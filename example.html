@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>HTML5 Canvas Example</title>
+    <script src="gi2d.js"></script>
+  </head>
+  <body>
+    <div>
+    <canvas id="gi2d_canvas" width="1024" height="768"></canvas>
+    </div>
+    <div>
+      <button onclick="refresh();">Refresh</button>
+    </div>
+    <script type="text/javascript">
+      gi2d = new GI2D(document.getElementById("gi2d_canvas"));
+      var wall1 = gi2d.addWall(new Wall(new Line([0, 0], [1, 0]), 10.0, 0.0));
+      var wall2 = gi2d.addWall(new Wall(new Line([1, 1], [0, 1]), 0.0, 0.0));
+      gi2d.setNumHemiRays(128);
+      function refresh() {
+        gi2d.drawScene();
+        gi2d.drawIrradianceOnWall(wall2, 1, 100.0);
+      }
+      refresh();
+    </script>
+  </body>
+</html>
+
