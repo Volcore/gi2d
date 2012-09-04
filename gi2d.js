@@ -25,12 +25,30 @@ function Line(start, end) {
   this.normal = function() {
     return Rotate(this.direction(), Math.PI/2.0)
   }
+  this.intersect = function(x, d) {
+    var denom = (start[1] - end[1])*d[0] - (start[0] - end[0])*d[1];
+    var numa = (start[0] - end[0])*(x[1] - end[1]) - (start[1] - end[1])*(x[0] - end[0]);
+    var numb = d[0]*(x[1] - end[1]) - d[1]*(x[0] - end[0]);
+    if (denom == 0.0) {
+      return -1;
+    }
+    var ua = numa/denom;
+    var ub = numb/denom;
+    if (ua > 0.0 && ub >= 0.0 && ub <= 1.0 ) {
+      return ua;
+    }
+    return -1.0;
+  }
 }
 
 function Wall(line, irradiance, diffuse) {
   this.line = line;
   this.irradiance = irradiance;
   this.diffuse = diffuse;
+  this.radiance = function() {
+    // Assuming diffuse emission, the irradiance is distributed evenly into all directions
+    return this.irradiance / (2.0 * Math.PI);
+  }
 }
 
 function GI2D(canvas) {
@@ -116,35 +134,89 @@ function GI2D(canvas) {
   }
   // Intersect returns distance and which wall has been hit
   this.intersect = function(x, d) {
-    return [0.0, 0];
+    var min_distance = 1e20;
+    var id = -1;
+    for (var wall_idx in this.walls_) {
+      var wall = this.walls_[wall_idx];
+      var distance = wall.line.intersect(x, d);
+      if (distance > 0 && distance < min_distance) {
+        id = wall_idx;
+        min_distance = distance;
+      }
+    }
+    if (id != -1) {
+      return [min_distance, id];
+    }
+    return null;
   }
   this.trace = function(x, d, first_bounce) {
-    // TODO
-    return [x, [0,1], 0.0]
+    var intersection = this.intersect(x, d);
+    if (intersection == null) {
+      return null;
+    }
+    var distance = intersection[0];
+    var wall_idx = intersection[1];
+    var p = [x[0] + d[0] * distance, x[1] + d[1] * distance];
+    var wall = this.walls_[wall_idx];
+    var n = wall.line.normal();
+    // Invert normal if pointing in the other direction
+    if (n[0] * d[0] + n[1] * d[1] > 0) {
+      n = [-n[0], -n[1]];
+    }
+    // Compute the radiance
+    var radiance = 0.0;
+    if (first_bounce) {
+      // On first bounce, add direct lighting
+      radiance += wall.radiance();
+    }
+    // TODO(VS): sample the direct lighting from here
+    // TODO(VS): round robin termination of path tracing
+    return [p, n, distance, radiance]
   }
   this.irradianceForPoint = function(x, n) {
-    // Debug rendering stuff
-    var ctx = this.canvas_.getContext("2d");
-    this.computeScaleOffset();
-    var scale = this.currentScale_;
-    var offset = this.currentOffset_;
-    var p = [scale[0]*x[0]+offset[0], scale[1]*x[1]+offset[1]];
-    ctx.beginPath();
+    // Integrate over the hemisphere
+    var irradiance = 0.0;
     for (var ray_index = 0; ray_index < this.numHemiRays_; ++ray_index) {
       // Stratified 
       var theta = Math.asin(2.0*(ray_index+Math.random())/this.numHemiRays_-1.0);
       var d = Rotate(n, theta);
-      var trace_result = this.trace(x, n, true);
-      var y = trace_result[0], n_y = trace_result[1], distance = trace_result[2];
-      ctx.moveTo(p[0], p[1]);
-      var p_y = [scale[0]*y[0]+offset[0], scale[1]*y[1]+offset[1]];
-      ctx.moveTo(p_y[0], p_y[1]);
+      var trace_result = this.trace(x, d, true);
+      if (trace_result == null) {
+        // Intersects nothing
+        continue;
+      }
+      // extract results
+      var y = trace_result[0];
+      var n_y = trace_result[1];
+      var distance = trace_result[2];
+      var radiance = trace_result[3];
+      // Accumulate the irradiance
+      var cosine = Math.cos(theta);
+      var probability = cosine/2.0;
+      irradiance += radiance * cosine / probability;
+      // Debug draw: visualize the incoming radiance along the rays
+      if (false) {
+        var ctx = this.canvas_.getContext("2d");
+        this.computeScaleOffset();
+        var scale = this.currentScale_;
+        var offset = this.currentOffset_;
+        ctx.beginPath();
+        var p = [scale[0]*x[0]+offset[0], scale[1]*x[1]+offset[1]];
+        ctx.moveTo(p[0], p[1]);
+        var p_y = [scale[0]*y[0]+offset[0], scale[1]*y[1]+offset[1]];
+        ctx.lineTo(p_y[0], p_y[1]);
+        ctx.closePath();
+        ctx.lineWidth = 1.0;
+        c = Math.floor(radiance*100);
+        console.log(c);
+        ctx.strokeStyle = "rgb("+c+","+c+","+c+")";
+        ctx.stroke();
+      }
     }
-    ctx.closePath();
-    ctx.lineWidth = 1.0;
-    ctx.stroke();
-    // Compute the irradiance
-    return Math.random();
+    // Normalize
+    irradiance /= this.numHemiRays_;
+    // return the samples
+    return [irradiance];
   }
   this.drawIrradianceOnWall = function(wall_idx, num_samples, value_scale) {
     var ctx = this.canvas_.getContext("2d");
@@ -164,7 +236,7 @@ function GI2D(canvas) {
       var position = step / 2.0 + step * sample;
       var p = wall.line.locationForParameter(position);
       var n = wall.line.normal();
-      var irradiance = this.irradianceForPoint(p, n);
+      var irradiance = this.irradianceForPoint(p, n)[0];
       max_irradiance = Math.max(irradiance, max_irradiance);
       sample_irradiances.push(irradiance);
     }
