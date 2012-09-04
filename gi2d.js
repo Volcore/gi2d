@@ -1,11 +1,15 @@
+kWallWidth = 5.0;
+kIrradianceColor = "#FF0000";
+kBackgroundColor = "#C3D9FF";
+kLightSourceColor = "#EBE54D";
+kWallColor = "#aaaaaa";
+
 function Sqr(x) { return x * x; }
 function Rotate(x, angle) {
   var c = Math.cos(angle);
   var s = Math.sin(angle);
   return [c * x[0] - s * x[1], s * x[0] + c * x[1]];
 }
-
-kWallWidth = 5.0
 
 function Line(start, end) {
   this.start = start;
@@ -102,7 +106,7 @@ function GI2D(canvas) {
     // Clear the canvas
     ctx.clearRect (0, 0, width, height);
     // Draw background
-    ctx.fillStyle = "#C3D9FF";
+    ctx.fillStyle = kBackgroundColor;
     ctx.fillRect(0, 0, width, height);
     // Fetch scale and offset
     this.computeScaleOffset();
@@ -123,9 +127,9 @@ function GI2D(canvas) {
       ctx.closePath()
       ctx.strokeStyle = "#000000";
       if (wall.irradiance > 0) {
-        ctx.fillStyle = "#EBE54D";
+        ctx.fillStyle = kLightSourceColor;
       } else {
-        ctx.fillStyle = "#aaaaaa";
+        ctx.fillStyle = kWallColor;
       }
       ctx.lineWidth = 3.0;
       ctx.stroke();
@@ -229,27 +233,25 @@ function GI2D(canvas) {
     // Sample irradiance at discrete locations on the wall
     var wall = this.walls_[wall_idx];
     var length = wall.line.length()
-    var step = length / num_samples;
     var sample_irradiances= [];
     var max_irradiance = 0;
     for (var sample = 0; sample < num_samples; ++sample) {
-      var position = step / 2.0 + step * sample;
-      var p = wall.line.locationForParameter(position);
+      var t = sample / num_samples;
+      var p = wall.line.locationForParameter(t);
       var n = wall.line.normal();
       var irradiance = this.irradianceForPoint(p, n)[0];
       max_irradiance = Math.max(irradiance, max_irradiance);
       sample_irradiances.push(irradiance);
     }
     // Draw the irradiances
-    ctx.strokeStyle = "#FF0000";
+    ctx.strokeStyle = kIrradianceColor;
     ctx.lineWidth = 3.0;
     ctx.beginPath()
     for (var sample = 0; sample < num_samples; ++sample) {
-      var position = step / 2.0 + step * sample;
-      var p = wall.line.locationForParameter(position);
+      var t = (sample+0.5) / num_samples;
+      var p = wall.line.locationForParameter(t);
       p = [scale[0]*p[0]+offset[0], scale[1]*p[1]+offset[1]];
       var n = wall.line.normal();
-      position += step;
       var s = value_scale * sample_irradiances[sample] / max_irradiance + kWallWidth;
       var x = [p[0] + n[0] * s, p[1] + n[1] * s];
       if (sample == 0) {
@@ -260,5 +262,51 @@ function GI2D(canvas) {
     }
     ctx.stroke();
     ctx.closePath();
+    // Draw the legend
+    if (true) {
+      var offset = 10;
+      // Draw irradiance
+      ctx.fillStyle = "#000000";
+      ctx.strokeStyle = kIrradianceColor;
+      ctx.font = "bold 16px Arial";
+      ctx.fillText("Irradiance", 30, height-offset);
+      ctx.beginPath();
+      ctx.moveTo(5, height-5-offset);
+      ctx.lineTo(25, height-5-offset);
+      ctx.stroke();
+      ctx.closePath();
+      offset += 20;
+      // Draw wall
+      ctx.fillStyle = "#000000";
+      ctx.strokeStyle = "#000000";
+      ctx.font = "bold 16px Arial";
+      ctx.fillText("Wall", 30, height-offset);
+      ctx.fillStyle = kWallColor;
+      ctx.beginPath();
+      ctx.moveTo(5, height-offset);
+      ctx.lineTo(5, height-10-offset);
+      ctx.lineTo(25, height-10-offset);
+      ctx.lineTo(25, height-offset);
+      ctx.lineTo(5, height-offset);
+      ctx.stroke();
+      ctx.fill();
+      ctx.closePath();
+      offset += 20;
+      // Draw light
+      ctx.fillStyle = "#000000";
+      ctx.strokeStyle = "#000000";
+      ctx.font = "bold 16px Arial";
+      ctx.fillText("Light Source", 30, height-offset);
+      ctx.fillStyle = kLightSourceColor;
+      ctx.beginPath();
+      ctx.moveTo(5, height-offset);
+      ctx.lineTo(5, height-10-offset);
+      ctx.lineTo(25, height-10-offset);
+      ctx.lineTo(25, height-offset);
+      ctx.lineTo(5, height-offset);
+      ctx.stroke();
+      ctx.fill();
+      ctx.closePath();
+    }
   }
 }
