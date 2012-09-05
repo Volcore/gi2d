@@ -381,6 +381,7 @@ function GI2D(canvas) {
     var length = wall.line.length()
     var sample_irradiances= [];
     var max_irradiance = 0;
+    var start = new Date().getTime();
     for (var sample = 0; sample < num_samples; ++sample) {
       var t = sample / num_samples;
       var p = wall.line.locationForParameter(t);
@@ -389,6 +390,8 @@ function GI2D(canvas) {
       max_irradiance = Math.max(irradiance_sample.E, max_irradiance);
       sample_irradiances.push(irradiance_sample);
     }
+    var end = new Date().getTime();
+    var time = end - start;
     // The drawing function
     var draw_function = function(color, value) {
       ctx.strokeStyle = color;
@@ -443,6 +446,10 @@ function GI2D(canvas) {
       var grad = Dot2(tangent, Transform22(sample_irradiances[idx].ddEocc, tangent));
       return value_scale * grad / max_irradiance + kWallWidth;
     });
+    // Draw debug text
+    ctx.fillStyle = "#444444";
+    ctx.font = "bold 12px Arial";
+    ctx.fillText("Computation took "+(time/1000)+" s", width-175, height-10);
   }
   this.drawLegend = function() {
     var ctx = this.canvas_.getContext("2d");
