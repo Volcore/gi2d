@@ -25,11 +25,13 @@ http://www.limbic.com/
 
 === What is this? ===
 
-TODO
+This repository contains an example implementation of Global Illumination in 2D, as described in the paper:
+
+  http://zurich.disneyresearch.com/~wjarosz/publications/jarosz12theory.html 
 
 === How to use ===
 
-TODO
+Open index.html in any html 5 + canvas supporting browser (works on mobile phones, too!).
 
 === Note ===
 
