@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>HTML5 Canvas Example</title>
+    <title>Global Illmuniation in 2D Example</title>
     <script src="gi2d.js"></script>
   </head>
   <body>
@@ -17,13 +17,13 @@
       gi2d = new GI2D(document.getElementById("gi2d_canvas"));
       var wall1 = gi2d.addWall(new Wall(new Line([0, 0], [1, 0]), 10.0, 0.0));
       var wall2 = gi2d.addWall(new Wall(new Line([1.2, 1], [-0.2, 1]), 0.0, 0.0));
-      var wall3 = gi2d.addWall(new Wall(new Line([1.2, 0.5], [0.5, 0.5]), 0.0, 0.0));
       function refresh() {
         gi2d.drawScene();
         var num_samples = document.getElementById('inputNumSamples').value;
         var num_hemi_samples = document.getElementById('inputNumHemiSamples').value;
         gi2d.setNumHemiRays(num_hemi_samples);
         gi2d.drawIrradianceOnWall(wall2, num_samples, 100.0);
+        gi2d.drawLegend();
       }
       refresh();
     </script>
