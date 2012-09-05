@@ -1,14 +1,29 @@
 kWallWidth = 5.0;
+kSceneBorder = 200.0;
 kIrradianceColor = "#FF0000";
+kIrradianceNoOcclusionGradientColor = "#F5B622";
+kIrradianceGradientColor = "#36802D";
 kBackgroundColor = "#C3D9FF";
 kLightSourceColor = "#EBE54D";
 kWallColor = "#aaaaaa";
 
 function Sqr(x) { return x * x; }
-function Rotate(x, angle) {
+function Rotate2(x, angle) {
   var c = Math.cos(angle);
   var s = Math.sin(angle);
   return [c * x[0] - s * x[1], s * x[0] + c * x[1]];
+}
+function Dot2(x, y) {
+  return x[0] * y[0] + x[1] * y[1];
+}
+function Scale2(s, x) {
+  return [s*x[0], s*x[1]];
+}
+function Add2(x, y) {
+  return [x[0] + y[0], x[1] + y[1]];
+}
+function Sub2(x, y) {
+  return [x[0] + y[0], x[1] + y[1]];
 }
 
 function Line(start, end) {
@@ -27,7 +42,7 @@ function Line(start, end) {
             (this.end[1] - this.start[1])/length];
   }
   this.normal = function() {
-    return Rotate(this.direction(), Math.PI/2.0)
+    return Rotate2(this.direction(), Math.PI/2.0)
   }
   this.intersect = function(x, d) {
     var denom = (start[1] - end[1])*d[0] - (start[0] - end[0])*d[1];
@@ -53,6 +68,14 @@ function Wall(line, irradiance, diffuse) {
     // Assuming diffuse emission, the irradiance is distributed evenly into all directions
     return this.irradiance / (2.0 * Math.PI);
   }
+}
+
+function IrradianceSample(E, dE, dEocc, ddE, ddEocc) {
+  this.E = E;
+  this.dE = dE;
+  this.dEocc = dEocc;
+  this.ddE = ddE;
+  this.ddEocc = ddEocc;
 }
 
 function GI2D(canvas) {
@@ -88,7 +111,7 @@ function GI2D(canvas) {
       }
     }
     // Compute isotropic scale and anisotropic offsets to map it into the canvas
-    var border = 100.0;
+    var border = kSceneBorder*2.0;
     var scale = [(width - border)/(max[0]-min[0]), (height - border)/(max[1]-min[1])];
     if (scale[0] < scale[1]) {
       scale[1] = scale[0];
@@ -156,11 +179,10 @@ function GI2D(canvas) {
   this.trace = function(x, d, first_bounce) {
     var intersection = this.intersect(x, d);
     if (intersection == null) {
-      return null;
+      return [d, 1e20, 0];
     }
     var distance = intersection[0];
     var wall_idx = intersection[1];
-    var p = [x[0] + d[0] * distance, x[1] + d[1] * distance];
     var wall = this.walls_[wall_idx];
     var n = wall.line.normal();
     // Invert normal if pointing in the other direction
@@ -175,29 +197,49 @@ function GI2D(canvas) {
     }
     // TODO(VS): sample the direct lighting from here
     // TODO(VS): round robin termination of path tracing
-    return [p, n, distance, radiance]
+    return [n, distance, radiance]
   }
-  this.irradianceForPoint = function(x, n) {
+  this.irradianceForPoint = function(x, n_x) {
+    // Precompute some values
+    var tangent = Rotate2(n_x, Math.PI/2);
     // Integrate over the hemisphere
-    var irradiance = 0.0;
+    // Returns an IrradianceSample
+    var E = 0.0;
+    var dE = [0.0, 0.0];
+    var dEocc = [0.0, 0.0];
+    var pL = 0.0;  // Previous radiance
+    var pR = 1e20;  // Previous radius
     for (var ray_index = 0; ray_index < this.numHemiRays_; ++ray_index) {
-      // Stratified 
+      // Stratified sampling
       var theta = Math.asin(2.0*(ray_index+Math.random())/this.numHemiRays_-1.0);
-      var d = Rotate(n, theta);
+      // Compute the direction of the ray, and path trace it
+      var d = Rotate2(n_x, theta);
       var trace_result = this.trace(x, d, true);
-      if (trace_result == null) {
-        // Intersects nothing
-        continue;
-      }
       // extract results
-      var y = trace_result[0];
-      var n_y = trace_result[1];
-      var distance = trace_result[2];
-      var radiance = trace_result[3];
+      var n_y = trace_result[0];
+      var r = trace_result[1];
+      var L = trace_result[2];
+      var y = [x[0] + d[0] * r, x[1] + d[1] * r];
       // Accumulate the irradiance
-      var cosine = Math.cos(theta);
-      var probability = cosine/2.0;
-      irradiance += radiance * cosine / probability;
+      var cosine_theta = Math.cos(theta);
+      var probability = cosine_theta/2.0;
+      E += L * cosine_theta / probability;
+      // Compute occlusion free gradient
+      var xy = [d[0] * r, d[1] * r];
+      var r2 = r*r;
+      var cosine_theta_y = -Dot2(xy, n_y)/r;
+      var ga = Scale2(3.0 / r2, xy);
+      var gb = Scale2(1.0 / (cosine_theta * r), n_x);
+      var gc = Scale2(1.0 / (cosine_theta_y * r), n_y);
+      dE = Add2(dE, Scale2(cosine_theta * L / probability, Add2(Sub2(ga, gb), gc)));
+      // Compute correct gradient
+      var tim = Math.asin(2.0*ray_index/this.numHemiRays_-1.0);
+      var ctim = Math.cos(tim);
+      var grad_scale = (L - pL) * Sqr(ctim) / Math.min(r, pR);
+      dEocc = Add2(dEocc, Scale2(grad_scale, tangent));
+      // Store values for this hemicircle stratum
+      pL = L;
+      pR = r;
       // Debug draw: visualize the incoming radiance along the rays
       if (false) {
         var ctx = this.canvas_.getContext("2d");
@@ -212,15 +254,15 @@ function GI2D(canvas) {
         ctx.closePath();
         ctx.lineWidth = 1.0;
         c = Math.floor(radiance*100);
-        console.log(c);
         ctx.strokeStyle = "rgb("+c+","+c+","+c+")";
         ctx.stroke();
       }
     }
     // Normalize
-    irradiance /= this.numHemiRays_;
+    E /= this.numHemiRays_;
+    dE = Scale2(1.0/this.numHemiRays_, dE);
     // return the samples
-    return [irradiance];
+    return new IrradianceSample(E, dE, dEocc, 0, 0);
   }
   this.drawIrradianceOnWall = function(wall_idx, num_samples, value_scale) {
     var ctx = this.canvas_.getContext("2d");
@@ -239,9 +281,9 @@ function GI2D(canvas) {
       var t = sample / num_samples;
       var p = wall.line.locationForParameter(t);
       var n = wall.line.normal();
-      var irradiance = this.irradianceForPoint(p, n)[0];
-      max_irradiance = Math.max(irradiance, max_irradiance);
-      sample_irradiances.push(irradiance);
+      var irradiance_sample = this.irradianceForPoint(p, n);
+      max_irradiance = Math.max(irradiance_sample.E, max_irradiance);
+      sample_irradiances.push(irradiance_sample);
     }
     // Draw the irradiances
     ctx.strokeStyle = kIrradianceColor;
@@ -252,7 +294,51 @@ function GI2D(canvas) {
       var p = wall.line.locationForParameter(t);
       p = [scale[0]*p[0]+offset[0], scale[1]*p[1]+offset[1]];
       var n = wall.line.normal();
-      var s = value_scale * sample_irradiances[sample] / max_irradiance + kWallWidth;
+      var s = value_scale * sample_irradiances[sample].E / max_irradiance + kWallWidth;
+      var x = [p[0] + n[0] * s, p[1] + n[1] * s];
+      if (sample == 0) {
+        ctx.moveTo(x[0], x[1]);
+      } else {
+        ctx.lineTo(x[0], x[1]);
+      }
+    }
+    ctx.stroke();
+    ctx.closePath();
+    // Draw the gradient
+    ctx.strokeStyle = kIrradianceNoOcclusionGradientColor;
+    ctx.lineWidth = 3.0;
+    ctx.beginPath()
+    for (var sample = 0; sample < num_samples; ++sample) {
+      var t = (sample+0.5) / num_samples;
+      var p = wall.line.locationForParameter(t);
+      p = [scale[0]*p[0]+offset[0], scale[1]*p[1]+offset[1]];
+      var n = wall.line.normal();
+      var tangent = Rotate2(n, Math.PI/2.0);
+      // Evaluate gradient in tangent direction
+      var grad = Dot2(tangent, sample_irradiances[sample].dE);
+      var s = value_scale * grad / max_irradiance + kWallWidth;
+      var x = [p[0] + n[0] * s, p[1] + n[1] * s];
+      if (sample == 0) {
+        ctx.moveTo(x[0], x[1]);
+      } else {
+        ctx.lineTo(x[0], x[1]);
+      }
+    }
+    ctx.stroke();
+    ctx.closePath();
+    // Draw the occlusion gradient
+    ctx.strokeStyle = kIrradianceGradientColor;
+    ctx.lineWidth = 3.0;
+    ctx.beginPath()
+    for (var sample = 0; sample < num_samples; ++sample) {
+      var t = (sample+0.5) / num_samples;
+      var p = wall.line.locationForParameter(t);
+      p = [scale[0]*p[0]+offset[0], scale[1]*p[1]+offset[1]];
+      var n = wall.line.normal();
+      var tangent = Rotate2(n, Math.PI/2.0);
+      // Evaluate gradient in tangent direction
+      var grad = Dot2(tangent, sample_irradiances[sample].dEocc);
+      var s = value_scale * grad / max_irradiance + kWallWidth;
       var x = [p[0] + n[0] * s, p[1] + n[1] * s];
       if (sample == 0) {
         ctx.moveTo(x[0], x[1]);
@@ -264,49 +350,44 @@ function GI2D(canvas) {
     ctx.closePath();
     // Draw the legend
     if (true) {
+      var items = [
+        ["Irradiance", kIrradianceColor, false],
+        ["Irradiance Gradient (no occlusion)", kIrradianceNoOcclusionGradientColor, false],
+        ["Irradiance Gradient (occlusion)", kIrradianceGradientColor, false],
+        ["Wall", kWallColor, true],
+        ["Light Source", kLightSourceColor, true]
+      ];
       var offset = 10;
       // Draw irradiance
-      ctx.fillStyle = "#000000";
-      ctx.strokeStyle = kIrradianceColor;
-      ctx.font = "bold 16px Arial";
-      ctx.fillText("Irradiance", 30, height-offset);
-      ctx.beginPath();
-      ctx.moveTo(5, height-5-offset);
-      ctx.lineTo(25, height-5-offset);
-      ctx.stroke();
-      ctx.closePath();
-      offset += 20;
-      // Draw wall
-      ctx.fillStyle = "#000000";
-      ctx.strokeStyle = "#000000";
-      ctx.font = "bold 16px Arial";
-      ctx.fillText("Wall", 30, height-offset);
-      ctx.fillStyle = kWallColor;
-      ctx.beginPath();
-      ctx.moveTo(5, height-offset);
-      ctx.lineTo(5, height-10-offset);
-      ctx.lineTo(25, height-10-offset);
-      ctx.lineTo(25, height-offset);
-      ctx.lineTo(5, height-offset);
-      ctx.stroke();
-      ctx.fill();
-      ctx.closePath();
-      offset += 20;
-      // Draw light
-      ctx.fillStyle = "#000000";
-      ctx.strokeStyle = "#000000";
-      ctx.font = "bold 16px Arial";
-      ctx.fillText("Light Source", 30, height-offset);
-      ctx.fillStyle = kLightSourceColor;
-      ctx.beginPath();
-      ctx.moveTo(5, height-offset);
-      ctx.lineTo(5, height-10-offset);
-      ctx.lineTo(25, height-10-offset);
-      ctx.lineTo(25, height-offset);
-      ctx.lineTo(5, height-offset);
-      ctx.stroke();
-      ctx.fill();
-      ctx.closePath();
+      for (var i = 0; i < items.length; ++i) {
+        var item = items[i];
+        ctx.fillStyle = "#000000";
+        ctx.font = "bold 16px Arial";
+        ctx.fillText(item[0], 30, height-offset);
+        if (item[2]) {
+          // Draw a box
+          ctx.strokeStyle = "#000000";
+          ctx.fillStyle = item[1];
+          ctx.beginPath();
+          ctx.moveTo(5, height-offset);
+          ctx.lineTo(5, height-10-offset);
+          ctx.lineTo(25, height-10-offset);
+          ctx.lineTo(25, height-offset);
+          ctx.lineTo(5, height-offset);
+          ctx.stroke();
+          ctx.fill();
+          ctx.closePath();
+        } else {
+          // Draw a line
+          ctx.strokeStyle = item[1];
+          ctx.beginPath();
+          ctx.moveTo(5, height-5-offset);
+          ctx.lineTo(25, height-5-offset);
+          ctx.stroke();
+          ctx.closePath();
+        }
+        offset += 20;
+      }
     }
   }
 }
